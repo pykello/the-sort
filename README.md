@@ -26,8 +26,8 @@ make
 
 | Algorithm        | threads | Ryzen 3900x | EPYC 7502P |
 |------------------|---------|-------------|------------|
-| std::sort        | 1       | 13.760 s    | 18.520 s   |
-| std::sort        | all     | 1.554 s     | 1.627 s    |
+| std::sort seq    | 1       | 13.760 s    | 18.520 s   |
+| std::sort par    | all     | 1.554 s     | 1.627 s    |
 | partitioned_sort | 2       | 7.812 s     | 10.174 s   |
 | partitioned sort | 4       | 4.155 s     | 5.255 s    |
 | partitioned sort | 8       | 2.322 s     | 2.887 s    |
