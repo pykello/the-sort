@@ -4,7 +4,7 @@
 
 ```
 sudo apt update
-sudo apt install build-essential cmake tbb-dev
+sudo apt install build-essential cmake libtbb-dev
 ```
 
 ## Building & Running
