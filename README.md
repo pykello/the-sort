@@ -13,6 +13,7 @@ sudo apt install build-essential cmake libtbb-dev
 mkdir build
 cd build
 cmake ..
+make
 
 ./sort
 ```
