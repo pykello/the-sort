@@ -28,17 +28,23 @@ void generate(int *data, int n)
         data[i] = rand();
 }
 
-void stdsort(int *data, int *result, int n)
+void stdseqsort(int *data, int *result, int n)
 {
     memcpy(result, data, n * sizeof(int));
     sort(std::execution::seq, result, result + n);
 }
 
-void parallel_quicksort(int *data, int *result, int n, int threads)
+void stdparsort(int *data, int *result, int n)
+{
+    memcpy(result, data, n * sizeof(int));
+    sort(std::execution::par, result, result + n);
+}
+
+void parallel_partitioned_sort(int *data, int *result, int n, int threads)
 {
     const int S = 5000;
     const int MAX_THREADS = 256;
-    unsigned char *partition = new unsigned char[n];
+    auto partition = std::make_unique<unsigned char[]>(n);
     
     // calculate pivots
     int sample[S];
@@ -113,7 +119,8 @@ void parallel_quicksort(int *data, int *result, int n, int threads)
     for (int i = 0; i < threads; i++)
     {
         vf3.push_back(async(std::launch::async, [&](int from, int size) {
-            sort(result + from, result + from + size);
+            // now that we have partitioned the data we can use the plain old sequential std sort
+            sort(std::execution::seq, result + from, result + from + size);
         }, offset, partition_size[i]));
         offset += partition_size[i];
     }
@@ -121,44 +128,54 @@ void parallel_quicksort(int *data, int *result, int n, int threads)
         f.wait();
 }
 
-void parallel_quicksort_2(int *data, int *result, int n)
+void parallel_partitioned_sort_2(int *data, int *result, int n)
 {
-    parallel_quicksort(data, result, n, 2);
+    parallel_partitioned_sort(data, result, n, 2);
 }
 
-void parallel_quicksort_4(int *data, int *result, int n)
+void parallel_partitioned_sort_4(int *data, int *result, int n)
 {
-    parallel_quicksort(data, result, n, 4);
+    parallel_partitioned_sort(data, result, n, 4);
 }
 
-void parallel_quicksort_8(int *data, int *result, int n)
+void parallel_partitioned_sort_8(int *data, int *result, int n)
 {
-    parallel_quicksort(data, result, n, 8);
+    parallel_partitioned_sort(data, result, n, 8);
 }
 
-void parallel_quicksort_16(int *data, int *result, int n)
+void parallel_partitioned_sort_12(int *data, int *result, int n)
 {
-    parallel_quicksort(data, result, n, 16);
+    parallel_partitioned_sort(data, result, n, 12);
 }
 
-void parallel_quicksort_32(int *data, int *result, int n)
+void parallel_partitioned_sort_16(int *data, int *result, int n)
 {
-    parallel_quicksort(data, result, n, 32);
+    parallel_partitioned_sort(data, result, n, 16);
 }
 
-void parallel_quicksort_64(int *data, int *result, int n)
+void parallel_partitioned_sort_24(int *data, int *result, int n)
 {
-    parallel_quicksort(data, result, n, 64);
+    parallel_partitioned_sort(data, result, n, 24);
 }
 
-void parallel_quicksort_128(int *data, int *result, int n)
+void parallel_partitioned_sort_32(int *data, int *result, int n)
 {
-    parallel_quicksort(data, result, n, 128);
+    parallel_partitioned_sort(data, result, n, 32);
 }
 
-void parallel_quicksort_256(int *data, int *result, int n)
+void parallel_partitioned_sort_64(int *data, int *result, int n)
 {
-    parallel_quicksort(data, result, n, 256);
+    parallel_partitioned_sort(data, result, n, 64);
+}
+
+void parallel_partitioned_sort_128(int *data, int *result, int n)
+{
+    parallel_partitioned_sort(data, result, n, 128);
+}
+
+void parallel_partitioned_sort_256(int *data, int *result, int n)
+{
+    parallel_partitioned_sort(data, result, n, 256);
 }
 
 uint64_t benchmark(const std::function<void(int *, int *, int n)> &sort_function, int *data, int *result, int n)
@@ -190,31 +207,40 @@ void verify(int *result, int *verification, int n)
 int main()
 {
     const int N = 200000000;
-    int *result = new int[N];
-    int *data = new int[N];
-    int *verification = new int[N];
+    auto result_u = std::make_unique<int[]>(N);
+    auto data_u = std::make_unique<int[]>(N);
+    auto verification_u = std::make_unique<int[]>(N);
+    int *result = result_u.get();
+    int *data = data_u.get();
+    int *verification = verification_u.get();
 
     generate(data, N);
     memcpy(verification, data, sizeof(int) * N);
     sort(verification, verification + N);
 
-    cout << "std: " << benchmark(stdsort, data, result, N) << endl;
+    cout << "std seq: " << benchmark(stdseqsort, data, result, N) << endl;
     verify(result, verification, N);
-    cout << "pqsort_2: " << benchmark(parallel_quicksort_2, data, result, N) << endl;
+    cout << "std par: " << benchmark(stdparsort, data, result, N) << endl;
     verify(result, verification, N);
-    cout << "pqsort_4: " << benchmark(parallel_quicksort_4, data, result, N) << endl;
+    cout << "partitioned_sort_2: " << benchmark(parallel_partitioned_sort_2, data, result, N) << endl;
     verify(result, verification, N);
-    cout << "pqsort_8: " << benchmark(parallel_quicksort_8, data, result, N) << endl;
+    cout << "partitioned_sort_4: " << benchmark(parallel_partitioned_sort_4, data, result, N) << endl;
     verify(result, verification, N);
-    cout << "pqsort_16: " << benchmark(parallel_quicksort_16, data, result, N) << endl;
+    cout << "partitioned_sort_8: " << benchmark(parallel_partitioned_sort_8, data, result, N) << endl;
     verify(result, verification, N);
-    cout << "pqsort_32: " << benchmark(parallel_quicksort_32, data, result, N) << endl;
+    cout << "partitioned_sort_12: " << benchmark(parallel_partitioned_sort_12, data, result, N) << endl;
     verify(result, verification, N);
-    cout << "pqsort_64: " << benchmark(parallel_quicksort_64, data, result, N) << endl;
+    cout << "partitioned_sort_16: " << benchmark(parallel_partitioned_sort_16, data, result, N) << endl;
     verify(result, verification, N);
-    cout << "pqsort_128: " << benchmark(parallel_quicksort_128, data, result, N) << endl;
+    cout << "partitioned_sort_24: " << benchmark(parallel_partitioned_sort_24, data, result, N) << endl;
     verify(result, verification, N);
-    cout << "pqsort_256: " << benchmark(parallel_quicksort_256, data, result, N) << endl;
+    cout << "partitioned_sort_32: " << benchmark(parallel_partitioned_sort_32, data, result, N) << endl;
+    verify(result, verification, N);
+    cout << "partitioned_sort_64: " << benchmark(parallel_partitioned_sort_64, data, result, N) << endl;
+    verify(result, verification, N);
+    cout << "partitioned_sort_128: " << benchmark(parallel_partitioned_sort_128, data, result, N) << endl;
+    verify(result, verification, N);
+    cout << "partitioned_sort_256: " << benchmark(parallel_partitioned_sort_256, data, result, N) << endl;
     verify(result, verification, N);
     return 0;
 }
