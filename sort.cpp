@@ -211,6 +211,7 @@ void parallel_partitioned_sort_256(int *data, int *result, int n)
 
 uint64_t benchmark(const std::function<void(int *, int *, int n)> &sort_function, int *data, int *result, int n)
 {
+    // Runs the sort function 3 times & chooses the lowest time.
     uint64_t min_time = UINT64_MAX;
     int repeats = 3;
     for (int i = 0; i < repeats; i++)
