@@ -15,7 +15,20 @@ cd build
 cmake ..
 make
 
+# Run all benchmarks
 ./sort
+
+# Don't run std
+./sort --disable-std
+
+# Don't run partitioned
+./sort --disable-partitioned
+
+# Change data size
+./sort --data-size 1000000
+
+# Change thread counts
+./sort --threads 4,8,16
 ```
 
 ## Results
