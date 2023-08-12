@@ -8,8 +8,22 @@
 #include <iomanip>
 #include <future>
 #include <chrono>
+#include <set>
+#include <sstream>
+#include "parallel_partitioned_sort.hpp"
 using namespace std;
 using namespace std::chrono;
+
+typedef std::function<void(int *, int *, int n)> SortFunc;
+
+struct Options {
+    bool printHelp = false;
+    int dataSize = 200000000;
+    bool runStd = true;
+    bool runPartitioned = true;
+    bool runMerge = true;
+    set<int> threadCounts {2,4,8,12,16,24,32,64,128,256};
+};
 
 uint64_t MeasureDurationMs(const std::function<void()> &body)
 {
@@ -40,176 +54,7 @@ void stdparsort(int *data, int *result, int n)
     sort(std::execution::par, result, result + n);
 }
 
-void parallel_partitioned_sort(int *data, int *result, int n, int threads)
-{
-    const int S = 5000;
-    const int MAX_THREADS = 256;
-    auto partition = std::make_unique<unsigned char[]>(n);
-    
-    /*
-     * Calculate Pivots
-     * To do this, we choose a small sample of the data, and use that to choose
-     * pivots. This will give us more equi-distance pivots than just choosing
-     * random ones.
-     */
-    int sample[S];
-    for (int i = 0; i < S; i++)
-        sample[i] = data[rand() % n];
-    sort(sample, sample + S);
-    int pivots[MAX_THREADS];
-    for (int i = 0; i < threads; i++)
-        pivots[i] = sample[((int64_t)(i + 1) * S) / threads - 1];
-
-    /*
-     * Calculate which positional ranges of array each thread is responsible for.
-     */
-    int pos_from[MAX_THREADS], pos_to[MAX_THREADS];
-    for (int i = 0; i < threads; i++)
-    {
-        if (i)
-            pos_from[i] = pos_to[i - 1];
-        else
-            pos_from[i] = 0;
-        if (i == threads - 1)
-            pos_to[i] = n;
-        else
-            pos_to[i] = ((int64_t)(i + 1) * n) / threads;
-    }
-
-    /*
-     * Count items that will be moved from each partion "x" to partition "y"
-     * and put it to cnt[x][y].
-     * 
-     * While doing this, also fill partition[i] says which partition data[i]
-     * belongs to.
-     * 
-     * We do this completely parallel.
-     */
-    int cnt[MAX_THREADS][MAX_THREADS] = {0}; // cnt[from][to]
-    vector<future<void>> vf1;
-    for (int i = 0; i < threads; i++)
-    {
-        vf1.push_back(async(std::launch::async, [&](int tidx) {
-            for (int i = pos_from[tidx]; i < pos_to[tidx]; i++) {
-                partition[i] = threads - 1;
-                // this could also be binary search, but for small sizes probably
-                // it doesn't matter much. Maybe upto 64. Need to improve.
-                while (partition[i] > 0 && data[i] <= pivots[partition[i] - 1])
-                    partition[i]--;
-                cnt[tidx][partition[i]]++;
-            }
-        }, i));
-    }
-    for (auto & f: vf1)
-        f.wait();
-
-    /*
-     * Create offsets array that will be useful when moving items between partitions.
-     * offsets[x][y] is the next position that an item from partition x to partition y
-     * should be placed at.
-     *
-     * Time doesn't depend on N, so no need to parallelize.
-     */
-    int offsets[MAX_THREADS][MAX_THREADS] = {0};
-    for (int j = 0; j < threads; j++) {
-        for (int i = 0; i < threads; i++) {
-            if (i != 0)
-                offsets[i][j] = offsets[i - 1][j] + cnt[i - 1][j];
-            else if (j != 0)
-                offsets[i][j] = offsets[threads - 1][j - 1] + cnt[threads - 1][j - 1];
-        }
-    }
-
-    /*
-     * Move data between partitions. Completely parallel.
-     */
-    vector<future<void>> vf2;
-    for (int i = 0; i < threads; i++)
-    {
-        vf2.push_back(async(std::launch::async, [&](int tidx) {
-            for (int j = pos_from[tidx]; j < pos_to[tidx]; j++) {
-                int p = partition[j];
-                result[offsets[tidx][p]++] = data[j];
-            }
-        }, i));
-    }
-    for (auto & f: vf2)
-        f.wait();
-
-    /* Calculate size of each partition */
-    int partition_size[MAX_THREADS] = {0};
-    for (int i = 0; i < threads; i++)
-        for (int j = 0; j < threads; j++)
-            partition_size[j] += cnt[i][j];
-
-    /*
-     * Sort each partition. Completely parallel.
-     */
-    vector<future<void>> vf3;
-    int offset = 0;
-    for (int i = 0; i < threads; i++)
-    {
-        vf3.push_back(async(std::launch::async, [&](int from, int size) {
-            // now that we have partitioned the data we can use the plain old sequential std sort
-            sort(std::execution::seq, result + from, result + from + size);
-        }, offset, partition_size[i]));
-        offset += partition_size[i];
-    }
-    for (auto & f: vf3)
-        f.wait();
-}
-
-void parallel_partitioned_sort_2(int *data, int *result, int n)
-{
-    parallel_partitioned_sort(data, result, n, 2);
-}
-
-void parallel_partitioned_sort_4(int *data, int *result, int n)
-{
-    parallel_partitioned_sort(data, result, n, 4);
-}
-
-void parallel_partitioned_sort_8(int *data, int *result, int n)
-{
-    parallel_partitioned_sort(data, result, n, 8);
-}
-
-void parallel_partitioned_sort_12(int *data, int *result, int n)
-{
-    parallel_partitioned_sort(data, result, n, 12);
-}
-
-void parallel_partitioned_sort_16(int *data, int *result, int n)
-{
-    parallel_partitioned_sort(data, result, n, 16);
-}
-
-void parallel_partitioned_sort_24(int *data, int *result, int n)
-{
-    parallel_partitioned_sort(data, result, n, 24);
-}
-
-void parallel_partitioned_sort_32(int *data, int *result, int n)
-{
-    parallel_partitioned_sort(data, result, n, 32);
-}
-
-void parallel_partitioned_sort_64(int *data, int *result, int n)
-{
-    parallel_partitioned_sort(data, result, n, 64);
-}
-
-void parallel_partitioned_sort_128(int *data, int *result, int n)
-{
-    parallel_partitioned_sort(data, result, n, 128);
-}
-
-void parallel_partitioned_sort_256(int *data, int *result, int n)
-{
-    parallel_partitioned_sort(data, result, n, 256);
-}
-
-uint64_t benchmark(const std::function<void(int *, int *, int n)> &sort_function, int *data, int *result, int n)
+uint64_t measure_min_exec_time(const SortFunc &sort_function, int *data, int *result, int n)
 {
     // Runs the sort function 3 times & chooses the lowest time.
     uint64_t min_time = UINT64_MAX;
@@ -236,9 +81,9 @@ void verify(int *result, int *verification, int n)
     cout << "Verified successfully!" << endl;
 }
 
-int main()
+void run_benchmark_suite(const Options &opts)
 {
-    const int N = 200000000;
+    int N = opts.dataSize;
     auto result_u = std::make_unique<int[]>(N);
     auto data_u = std::make_unique<int[]>(N);
     auto verification_u = std::make_unique<int[]>(N);
@@ -248,31 +93,93 @@ int main()
 
     generate(data, N);
     memcpy(verification, data, sizeof(int) * N);
-    sort(verification, verification + N);
+    sort(std::execution::par, verification, verification + N);
 
-    cout << "std seq: " << benchmark(stdseqsort, data, result, N) << endl;
+#define RUN(name, f) \
+    cout << name ": " << measure_min_exec_time(f, data, result, N) << endl; \
     verify(result, verification, N);
-    cout << "std par: " << benchmark(stdparsort, data, result, N) << endl;
-    verify(result, verification, N);
-    cout << "partitioned_sort_2: " << benchmark(parallel_partitioned_sort_2, data, result, N) << endl;
-    verify(result, verification, N);
-    cout << "partitioned_sort_4: " << benchmark(parallel_partitioned_sort_4, data, result, N) << endl;
-    verify(result, verification, N);
-    cout << "partitioned_sort_8: " << benchmark(parallel_partitioned_sort_8, data, result, N) << endl;
-    verify(result, verification, N);
-    cout << "partitioned_sort_12: " << benchmark(parallel_partitioned_sort_12, data, result, N) << endl;
-    verify(result, verification, N);
-    cout << "partitioned_sort_16: " << benchmark(parallel_partitioned_sort_16, data, result, N) << endl;
-    verify(result, verification, N);
-    cout << "partitioned_sort_24: " << benchmark(parallel_partitioned_sort_24, data, result, N) << endl;
-    verify(result, verification, N);
-    cout << "partitioned_sort_32: " << benchmark(parallel_partitioned_sort_32, data, result, N) << endl;
-    verify(result, verification, N);
-    cout << "partitioned_sort_64: " << benchmark(parallel_partitioned_sort_64, data, result, N) << endl;
-    verify(result, verification, N);
-    cout << "partitioned_sort_128: " << benchmark(parallel_partitioned_sort_128, data, result, N) << endl;
-    verify(result, verification, N);
-    cout << "partitioned_sort_256: " << benchmark(parallel_partitioned_sort_256, data, result, N) << endl;
-    verify(result, verification, N);
+#define RUN_MULTITHREADED(name, f, threads) \
+    if (opts.threadCounts.count(threads)) {\
+        RUN(name "<" #threads ">", f<threads>) \
+    }
+#define RUN_MULTITHREADED_ALL(name, f) \
+    RUN_MULTITHREADED(name, f, 2); \
+    RUN_MULTITHREADED(name, f, 4); \
+    RUN_MULTITHREADED(name, f, 8); \
+    RUN_MULTITHREADED(name, f, 12); \
+    RUN_MULTITHREADED(name, f, 16); \
+    RUN_MULTITHREADED(name, f, 24); \
+    RUN_MULTITHREADED(name, f, 32); \
+    RUN_MULTITHREADED(name, f, 64); \
+    RUN_MULTITHREADED(name, f, 128); \
+    RUN_MULTITHREADED(name, f, 256);
+
+    if (opts.runStd)
+    {
+        RUN("std seq", stdseqsort);
+        RUN("std par", stdparsort);
+    }
+
+    if (opts.runPartitioned)
+    {
+        RUN_MULTITHREADED_ALL("partitioned_sort", parallel_partitioned_sort);
+    }
+}
+
+int main(int argc, char* argv[])
+{
+    Options opts;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp("--disable-std", argv[i]) == 0)
+            opts.runStd = false;
+        else if (strcmp("--disable-partitioned", argv[i]) == 0)
+            opts.runPartitioned = false;
+        else if (strcmp("--disable-merge", argv[i]) == 0)
+            opts.runMerge = false;
+        else if (strcmp("--threads", argv[i]) == 0)
+        {
+            if (i == argc - 1) {
+                opts.printHelp = true;
+                std::cerr << "Missing thread counts." << std::endl;
+                break;
+            }
+            std::istringstream tokenStream(argv[i + 1]);
+            opts.threadCounts.clear();
+            string token;
+            while (std::getline(tokenStream, token, ',')) {
+                opts.threadCounts.insert(atoi(token.c_str()));
+            }
+            i++;
+        }
+        else if (strcmp("--data-size", argv[i]) == 0)
+        {
+            if (i == argc - 1) {
+                opts.printHelp = true;
+                std::cerr << "Missing data size." << std::endl;
+                break;
+            }
+            opts.dataSize = atoi(argv[i+1]);
+            i++;
+        }
+        else if (strcmp("--help", argv[i]) == 0)
+        {
+            opts.printHelp = true;
+        }
+        else
+        {
+            std::cerr << "Unknown option " << argv[i] << "." << std::endl;
+            opts.printHelp = true;
+        }
+    }
+
+    if (opts.printHelp)
+    {
+        cout << argv[0] << " [--disable-std] [--disable-partitioned] [--disable-merge] [--threads t1,t2,t3] [--data-size N]" << endl;
+    }
+    else
+    {
+        run_benchmark_suite(opts);
+    }
+
     return 0;
 }
